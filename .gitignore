@@ -1,0 +1,12 @@
+*.exe
+*.exe~
+*.test
+*.out
+/bin/
+/dist/
+coverage.txt
+.env
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
