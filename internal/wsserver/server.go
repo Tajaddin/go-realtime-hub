@@ -5,6 +5,7 @@ package wsserver
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -41,12 +42,16 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(s.hub.Stats())
+		if err := json.NewEncoder(w).Encode(s.hub.Stats()); err != nil {
+			log.Printf("encode /stats: %v", err)
+		}
 	})
 	mux.HandleFunc("GET /presence", func(w http.ResponseWriter, r *http.Request) {
 		room := r.URL.Query().Get("room")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"room": room, "members": s.hub.Presence(room)})
+		if err := json.NewEncoder(w).Encode(map[string]any{"room": room, "members": s.hub.Presence(room)}); err != nil {
+			log.Printf("encode /presence: %v", err)
+		}
 	})
 	mux.HandleFunc("GET /ws", s.serveWS)
 	return mux
@@ -72,7 +77,9 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	s.hub.Join(id, room)
 	defer func() {
 		s.hub.RemoveClient(id)
-		_ = conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Printf("ws close (id=%s): %v", id, err)
+		}
 	}()
 
 	go s.writePump(conn, client)
