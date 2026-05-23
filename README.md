@@ -1,6 +1,6 @@
 # go-realtime-hub
 
-> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **1.28 million message deliveries/sec fanning out to 10,000 subscribers in one room, 0 dropped.** Lock-free-for-slow-clients fan-out, 12 tests under the race detector, distroless image.
+> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.07M message deliveries/sec median (commodity load), 1.28M peak (idle machine)** fanning out to 10,000 subscribers in one room, 0 dropped. Lock-free-for-slow-clients fan-out, 12 tests under the race detector, distroless image.
 
 [![ci](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -19,8 +19,11 @@ go run ./load -subscribers 10000 -messages 200
 | Subscribers in the room | 10,000 |
 | Messages published | 200 |
 | Fan-out operations | 2,000,000 |
-| **Delivery throughput** | **1,281,987 /sec** |
+| **Delivery throughput (median, commodity load)** | **~1,066,000 /sec** |
+| **Delivery throughput (peak, idle machine)** | **1,281,987 /sec** |
 | Dropped (consumers kept up) | 0 |
+
+Throughput depends on machine load: both the publisher and 10,000 consumer goroutines compete for CPU. Today's 3-run median on an i7-10875H under normal dev-session load: 1,088,989 / 1,066,319 / 926,731 deliveries/sec (median 1.07M, max 1.09M). The 1.28M peak was captured on the same hardware with the machine idle. See [`bench/results.txt`](bench/results.txt) for both runs and full hardware specs.
 
 The Publish hot path does a **non-blocking** send to each subscriber. A client whose buffer is full has its message dropped and counted, so one slow consumer can never stall the publisher or the other 9,999 subscribers. That bounded, lossy-for-slow-clients fan-out is what keeps a realtime server responsive under load.
 
