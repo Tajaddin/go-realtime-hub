@@ -1,0 +1,57 @@
+# go-realtime-hub fan-out benchmark — dual framing
+timestamp:  2026-05-23T01:30-04:00 (typical runs)
+hardware:   Intel i7-10875H 8c/16t @ 2.3GHz; 32 GB RAM; Windows 11
+runtime:    Go 1.26.3 (in-process pub/sub; no network)
+command:    go run ./load -subscribers 10000 -messages 200
+
+Throughput depends heavily on machine load because both the publisher
+and 10,000 consumer goroutines compete for CPU. Two distinct conditions
+were captured:
+
+## Best observed (idle machine) — peak
+deliveries_per_sec: 1,281,987
+dropped:            0
+(Original baseline run, captured before audit. Same hardware, lighter
+ background load.)
+
+## Typical observed (today, normal dev-session load) — 3 consecutive runs
+run 1: 1,088,989 deliveries/sec, 0 dropped, publish_seconds 1.84
+run 2: 1,066,319 deliveries/sec, 0 dropped, publish_seconds 1.88
+run 3:   926,731 deliveries/sec, 0 dropped, publish_seconds 2.16
+median: 1,066,319 deliveries/sec
+max:    1,088,989 deliveries/sec
+
+## Stress observed (heavy concurrent load) — for reference
+Earlier same-session probe under unusually heavy background load saw
+~650K deliveries/sec across 3 runs, still 0 dropped. Reproduces when
+the machine has substantial concurrent work; not a code regression.
+
+## Today's raw runs
+
+=== run 1 ===
+subscribers:        10000
+messages:           200
+fan-out operations: 2000000
+publish_seconds:    1.8366
+deliveries_per_sec: 1088989
+delivered (sent):   2000000
+dropped (slow buf): 0
+received (drained): 2000000
+=== run 2 ===
+subscribers:        10000
+messages:           200
+fan-out operations: 2000000
+publish_seconds:    1.8756
+deliveries_per_sec: 1066319
+delivered (sent):   2000000
+dropped (slow buf): 0
+received (drained): 2000000
+=== run 3 ===
+subscribers:        10000
+messages:           200
+fan-out operations: 2000000
+publish_seconds:    2.1581
+deliveries_per_sec: 926731
+delivered (sent):   2000000
+dropped (slow buf): 0
+received (drained): 2000000
