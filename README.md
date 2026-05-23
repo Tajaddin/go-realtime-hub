@@ -53,11 +53,15 @@ Role categories unlocked: **Backend (Go)**, realtime/streaming, Platform.
 
 Realtime fan-out (chat, presence, live dashboards, multiplayer) is a common modern requirement, and getting backpressure right is the hard part most implementations miss. This backs the "WebSocket / realtime / Go concurrency" resume line with a measured 1.28M-delivery/sec core and a race-tested concurrency model.
 
-## Run it
+## How to run
+
+Prerequisites: Go 1.23+ (Docker optional for the distroless image).
 
 ```bash
+go test ./...                # 12 race-tested unit + integration cases
 go run ./cmd/server          # ws://localhost:8080/ws?room=lobby
-# or
+go run ./load -subscribers 10000 -messages 200   # fan-out benchmark
+# alt: distroless container
 docker build -t go-realtime-hub . && docker run -p 8080:8080 go-realtime-hub
 ```
 
