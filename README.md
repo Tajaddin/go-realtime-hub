@@ -1,6 +1,6 @@
 # go-realtime-hub
 
-> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.07M message deliveries/sec median (commodity load), 1.28M peak (idle machine)** fanning out to 10,000 subscribers in one room, 0 dropped. Lock-free-for-slow-clients fan-out, 12 tests under the race detector, distroless image.
+> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.07M message deliveries/sec median (commodity load), 1.28M peak (idle machine)** fanning out to 10,000 subscribers in one room, 0 dropped. Lock-free-for-slow-clients fan-out, 11 tests under the race detector, distroless image.
 
 [![ci](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -78,7 +78,7 @@ curl localhost:8080/stats                  # {"clients":2,"rooms":1,"delivered":
 ## Testing
 
 ```bash
-go test ./... -race        # 12 tests, race detector on
+go test ./... -race        # 11 tests, race detector on
 go test ./internal/... -cover
 ```
 
