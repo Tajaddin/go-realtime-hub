@@ -1,6 +1,6 @@
 # go-realtime-hub
 
-> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.55M message deliveries/sec (median of 14 runs)** fanning out to 10,000 subscribers in one room, 0 dropped. Lock-free-for-slow-clients fan-out, 17 tests under the race detector, distroless image.
+> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.55M message deliveries/sec (median of 14 runs)** fanning out to 10,000 subscribers in one room, 0 dropped. Non-blocking fan-out (a slow client never stalls the publisher), 18 tests under the race detector, distroless image.
 
 [![ci](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -35,12 +35,12 @@ client --ws--> /ws?room=lobby ──┐
                          hub (rooms, presence)
                                 │  Publish fans out
                                 ▼
-            every other member's send buffer --ws--> client
+        every member's send buffer (sender included) --ws--> client
 ```
 
 | Concern | Implementation |
 |---|---|
-| Transport | WebSocket via `gorilla/websocket`, one read pump + one write pump per connection; ping every 54 s, a peer with no pong for 60 s is dropped, writes time out after 10 s |
+| Transport | WebSocket via `gorilla/websocket`, one read pump + one write pump per connection; ping every 54 s, a peer with no pong for 60 s is dropped, and a write that fails or takes over 10 s closes the connection |
 | Pub/sub core | `internal/hub`: `RWMutex`-guarded rooms, non-blocking fan-out, drop-counting backpressure |
 | Presence | sorted member list per room, exposed at `/presence?room=` |
 | Backpressure | per-client buffered channel; full buffer drops, never blocks (proven in tests) |
@@ -58,7 +58,7 @@ Realtime fan-out (chat, presence, live dashboards, multiplayer) is a common mode
 Prerequisites: Go 1.23+ (Docker optional for the distroless image).
 
 ```bash
-go test ./...                # 17 unit + integration tests
+go test ./...                # 18 unit + integration tests
 go run ./cmd/server          # ws://localhost:8080/ws?room=lobby
 # browsers may connect only from the server's own origin unless you allow others:
 go run ./cmd/server -allowed-origins https://app.example.com
@@ -74,6 +74,9 @@ websocat "ws://localhost:8080/ws?room=lobby&id=alice"
 websocat "ws://localhost:8080/ws?room=lobby&id=bob"
 # `id` is optional (the server generates one); an id that is already connected
 # is refused with 409 Conflict, so nobody can take over another client's stream.
+# A client that drops without closing its socket and reconnects with the same
+# id is refused until the server notices the old connection is dead (up to
+# 60 s); omit `id` on reconnect to avoid the wait.
 
 curl localhost:8080/presence?room=lobby   # {"room":"lobby","members":["alice","bob"]}
 curl localhost:8080/stats                  # {"clients":2,"rooms":1,"delivered":N,"dropped":0}
@@ -82,12 +85,12 @@ curl localhost:8080/stats                  # {"clients":2,"rooms":1,"delivered":
 ## Testing
 
 ```bash
-go test ./... -race        # 17 tests, race detector on
+go test ./... -race        # 18 tests, race detector on
 go test ./internal/... -cover
 ```
 
 - **hub**: fan-out to all members, room isolation, sorted presence, leave stops delivery, remove-client cleans all rooms, **backpressure drops instead of blocking**, 50-goroutine concurrent join/publish race-freedom, publish during client removal, duplicate-id rejection (95.7% coverage).
-- **wsserver**: real WebSocket broadcast between two `gorilla` clients over `httptest`, presence endpoint, healthz, room-required rejection, duplicate id refused with 409, origin allowlist, unresponsive peer dropped and live peer kept by ping/pong (75.6% coverage).
+- **wsserver**: real WebSocket broadcast between two `gorilla` clients over `httptest`, presence endpoint, healthz, room-required rejection, duplicate id refused with 409, origin allowlist, unresponsive peer dropped and live peer kept by ping/pong, peer with stalled writes dropped (79.0% coverage).
 
 ## Project layout
 
