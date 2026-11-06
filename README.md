@@ -90,7 +90,7 @@ go test ./internal/... -cover
 ```
 
 - **hub**: fan-out to all members, room isolation, sorted presence, leave stops delivery, remove-client cleans all rooms, **backpressure drops instead of blocking**, 50-goroutine concurrent join/publish race-freedom, publish during client removal, duplicate-id rejection (95.7% coverage).
-- **wsserver**: real WebSocket broadcast between two `gorilla` clients over `httptest`, presence endpoint, healthz, room-required rejection, duplicate id refused with 409, origin allowlist, unresponsive peer dropped and live peer kept by ping/pong, peer with stalled writes dropped (79.0% coverage).
+- **wsserver**: real WebSocket broadcast between two `gorilla` clients over `httptest`, presence endpoint, healthz, room-required rejection, duplicate id refused with 409, origin allowlist, unresponsive peer dropped and live peer kept by ping/pong, peer with stalled writes dropped (77.8% coverage).
 
 ## Project layout
 
