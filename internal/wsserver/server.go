@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,22 +19,40 @@ import (
 var idSeq atomic.Int64
 
 type Server struct {
-	hub      *hub.Hub
-	upgrader websocket.Upgrader
-	sendBuf  int
+	hub            *hub.Hub
+	upgrader       websocket.Upgrader
+	sendBuf        int
+	allowedOrigins map[string]bool
 }
 
-func New(h *hub.Hub) *Server {
-	return &Server{
-		hub:     h,
-		sendBuf: 64,
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
-			// Demo server: accept any origin. Lock this down in production.
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		},
+// New returns a server for h. A browser may open a WebSocket only from the
+// server's own origin or from one of allowedOrigins (for example
+// "https://app.example.com"); clients that send no Origin header, which
+// browsers always do, are not restricted.
+func New(h *hub.Hub, allowedOrigins ...string) *Server {
+	s := &Server{
+		hub:            h,
+		sendBuf:        64,
+		allowedOrigins: make(map[string]bool, len(allowedOrigins)),
 	}
+	for _, o := range allowedOrigins {
+		s.allowedOrigins[strings.ToLower(o)] = true
+	}
+	s.upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     s.checkOrigin,
+	}
+	return s
+}
+
+func (s *Server) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" || s.allowedOrigins[strings.ToLower(origin)] {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
 
 func (s *Server) Handler() http.Handler {

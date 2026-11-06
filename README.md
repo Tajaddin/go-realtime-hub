@@ -60,6 +60,8 @@ Prerequisites: Go 1.23+ (Docker optional for the distroless image).
 ```bash
 go test ./...                # 12 race-tested unit + integration cases
 go run ./cmd/server          # ws://localhost:8080/ws?room=lobby
+# browsers may connect only from the server's own origin unless you allow others:
+go run ./cmd/server -allowed-origins https://app.example.com
 go run ./load -subscribers 10000 -messages 200   # fan-out benchmark
 # alt: distroless container
 docker build -t go-realtime-hub . && docker run -p 8080:8080 go-realtime-hub

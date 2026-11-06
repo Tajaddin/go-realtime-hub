@@ -1,6 +1,7 @@
 package wsserver
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,6 +111,38 @@ func TestDuplicateIDIsRejected(t *testing.T) {
 	_ = alice.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, msg, err := alice.ReadMessage(); err != nil || string(msg) != "still there?" {
 		t.Fatalf("original alice should keep receiving: msg=%q err=%v", msg, err)
+	}
+}
+
+func TestCheckOrigin(t *testing.T) {
+	srv := httptest.NewServer(New(hub.New(), "https://app.example").Handler())
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	for i, tc := range []struct {
+		origin string
+		want   int
+	}{
+		{"https://evil.example", http.StatusForbidden},
+		{"https://app.example", http.StatusSwitchingProtocols},
+		{srv.URL, http.StatusSwitchingProtocols}, // same origin
+		{"", http.StatusSwitchingProtocols},      // non-browser client
+	} {
+		hdr := http.Header{}
+		if tc.origin != "" {
+			hdr.Set("Origin", tc.origin)
+		}
+		conn, resp, err := websocket.DefaultDialer.Dial(fmt.Sprintf("%s/ws?room=r&id=c%d", wsURL, i), hdr)
+		if conn != nil {
+			conn.Close()
+		}
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		if status != tc.want {
+			t.Errorf("Origin %q: status %d (err %v), want %d", tc.origin, status, err, tc.want)
+		}
 	}
 }
 
