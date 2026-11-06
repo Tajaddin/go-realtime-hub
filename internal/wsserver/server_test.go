@@ -199,6 +199,30 @@ func TestPeerAnsweringPingsStaysConnected(t *testing.T) {
 	}
 }
 
+// A peer whose socket stops taking data must be dropped once a write times
+// out, not left registered until its read deadline expires.
+func TestPeerWithStalledWritesIsDropped(t *testing.T) {
+	h := hub.New()
+	s := New(h)
+	s.writeWait = 100 * time.Millisecond
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	conn := dial(t, wsURL, "r", "stalled") // never reads, so the server's writes back up
+	defer conn.Close()
+	if !waitForClients(h, 1, time.Second) {
+		t.Fatal("client never registered")
+	}
+	msg := make([]byte, 1<<20)
+	for i := 0; i < 64; i++ {
+		h.Publish("r", msg)
+	}
+	if !waitForClients(h, 0, 3*time.Second) {
+		t.Fatal("peer was still registered after a write to it timed out")
+	}
+}
+
 func TestRequiresRoom(t *testing.T) {
 	wsURL, closeSrv := startServer(t)
 	defer closeSrv()

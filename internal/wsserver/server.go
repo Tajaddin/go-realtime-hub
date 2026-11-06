@@ -5,7 +5,9 @@ package wsserver
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -109,9 +111,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	s.hub.Join(id, room)
 	defer func() {
 		s.hub.RemoveClient(id)
-		if err := conn.Close(); err != nil {
-			log.Printf("ws close (id=%s): %v", id, err)
-		}
+		closeConn(conn, id)
 	}()
 
 	go s.writePump(conn, client)
@@ -135,9 +135,15 @@ func (s *Server) readPump(conn *websocket.Conn, room string) {
 	}
 }
 
+// writePump drains client.Send to the socket and pings the peer. Whatever
+// stops it (a failed or timed-out write, or the hub closing Send) also closes
+// the socket, which ends readPump and with it the client's registration.
 func (s *Server) writePump(conn *websocket.Conn, client *hub.Client) {
 	ping := time.NewTicker(s.pongWait * 9 / 10)
-	defer ping.Stop()
+	defer func() {
+		ping.Stop()
+		closeConn(conn, client.ID)
+	}()
 	for {
 		select {
 		case msg, ok := <-client.Send:
@@ -160,6 +166,14 @@ func (s *Server) write(conn *websocket.Conn, messageType int, data []byte) error
 		return err
 	}
 	return conn.WriteMessage(messageType, data)
+}
+
+// closeConn closes conn. Both pumps call it when they stop, so the second
+// call finding the socket already closed is expected and not logged.
+func closeConn(conn *websocket.Conn, id string) {
+	if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		log.Printf("ws close (id=%s): %v", id, err)
+	}
 }
 
 func itoa(n int64) string {
