@@ -1,6 +1,6 @@
 # go-realtime-hub
 
-> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.07M message deliveries/sec median (commodity load), 1.28M peak (idle machine)** fanning out to 10,000 subscribers in one room, 0 dropped. Lock-free-for-slow-clients fan-out, 11 tests under the race detector, distroless image.
+> Realtime WebSocket hub in Go: clients join rooms, messages fan out to every member, with presence and backpressure. **~1.55M message deliveries/sec (median of 14 runs)** fanning out to 10,000 subscribers in one room, 0 dropped. Lock-free-for-slow-clients fan-out, 17 tests under the race detector, distroless image.
 
 [![ci](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/go-realtime-hub/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -19,11 +19,11 @@ go run ./load -subscribers 10000 -messages 200
 | Subscribers in the room | 10,000 |
 | Messages published | 200 |
 | Fan-out operations | 2,000,000 |
-| **Delivery throughput (median, commodity load)** | **~1,066,000 /sec** |
-| **Delivery throughput (peak, idle machine)** | **1,281,987 /sec** |
+| **Delivery throughput (median of 14 runs)** | **~1,549,000 /sec** |
+| Slowest / fastest run | 1,057,842 / 6,470,314 /sec |
 | Dropped (consumers kept up) | 0 |
 
-Throughput depends on machine load: both the publisher and 10,000 consumer goroutines compete for CPU. Today's 3-run median on an i7-10875H under normal dev-session load: 1,088,989 / 1,066,319 / 926,731 deliveries/sec (median 1.07M, max 1.09M). The 1.28M peak was captured on the same hardware with the machine idle. See [`bench/results.txt`](bench/results.txt) for both runs and full hardware specs.
+Measured 2026-11-06 on an Intel i5-13600KF (14 cores / 20 threads, 32 GB, Windows 11, Go 1.27.3) on a machine shared with other jobs (total CPU 68-90% when sampled before and after the runs), so this is a loaded-machine figure, not an idle one. Throughput swings with machine load because the publisher and 10,000 consumer goroutines compete for CPU, so read the median, not the fastest run. See [`bench/results.txt`](bench/results.txt) for every run.
 
 The Publish hot path does a **non-blocking** send to each subscriber. A client whose buffer is full has its message dropped and counted, so one slow consumer can never stall the publisher or the other 9,999 subscribers. That bounded, lossy-for-slow-clients fan-out is what keeps a realtime server responsive under load.
 
@@ -44,21 +44,21 @@ client --ws--> /ws?room=lobby ──┐
 | Pub/sub core | `internal/hub`: `RWMutex`-guarded rooms, non-blocking fan-out, drop-counting backpressure |
 | Presence | sorted member list per room, exposed at `/presence?room=` |
 | Backpressure | per-client buffered channel; full buffer drops, never blocks (proven in tests) |
-| Safety | race-detector-clean under 50-goroutine concurrent join/publish |
+| Safety | race-detector-clean under 50-goroutine concurrent join/publish and under publish during client removal; duplicate client ids refused; browser origins allowlisted |
 | Deploy | static `CGO_ENABLED=0` binary in a distroless nonroot image |
 
 ## Why this matters for hiring
 
 Role categories unlocked: **Backend (Go)**, realtime/streaming, Platform.
 
-Realtime fan-out (chat, presence, live dashboards, multiplayer) is a common modern requirement, and getting backpressure right is the hard part most implementations miss. This backs the "WebSocket / realtime / Go concurrency" resume line with a measured 1.28M-delivery/sec core and a race-tested concurrency model.
+Realtime fan-out (chat, presence, live dashboards, multiplayer) is a common modern requirement, and getting backpressure right is the hard part most implementations miss. This backs the "WebSocket / realtime / Go concurrency" resume line with a measured ~1.55M-delivery/sec core and a race-tested concurrency model.
 
 ## How to run
 
 Prerequisites: Go 1.23+ (Docker optional for the distroless image).
 
 ```bash
-go test ./...                # 12 race-tested unit + integration cases
+go test ./...                # 17 unit + integration tests
 go run ./cmd/server          # ws://localhost:8080/ws?room=lobby
 # browsers may connect only from the server's own origin unless you allow others:
 go run ./cmd/server -allowed-origins https://app.example.com
@@ -82,12 +82,12 @@ curl localhost:8080/stats                  # {"clients":2,"rooms":1,"delivered":
 ## Testing
 
 ```bash
-go test ./... -race        # 11 tests, race detector on
+go test ./... -race        # 17 tests, race detector on
 go test ./internal/... -cover
 ```
 
-- **hub**: fan-out to all members, room isolation, sorted presence, leave stops delivery, remove-client cleans all rooms, **backpressure drops instead of blocking**, 50-goroutine concurrent join/publish race-freedom (94.5% coverage).
-- **wsserver**: real WebSocket broadcast between two `gorilla` clients over `httptest`, presence endpoint, healthz, room-required rejection (71.4% coverage).
+- **hub**: fan-out to all members, room isolation, sorted presence, leave stops delivery, remove-client cleans all rooms, **backpressure drops instead of blocking**, 50-goroutine concurrent join/publish race-freedom, publish during client removal, duplicate-id rejection (95.7% coverage).
+- **wsserver**: real WebSocket broadcast between two `gorilla` clients over `httptest`, presence endpoint, healthz, room-required rejection, duplicate id refused with 409, origin allowlist, unresponsive peer dropped and live peer kept by ping/pong (75.6% coverage).
 
 ## Project layout
 
