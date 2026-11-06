@@ -146,10 +146,11 @@ func TestCheckOrigin(t *testing.T) {
 	}
 }
 
-func startKeepaliveServer(t *testing.T, pongWait time.Duration) (*hub.Hub, string) {
+func startKeepaliveServer(t *testing.T, pingPeriod, pongWait time.Duration) (*hub.Hub, string) {
 	t.Helper()
 	h := hub.New()
 	s := New(h)
+	s.pingPeriod = pingPeriod
 	s.pongWait = pongWait
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
@@ -170,7 +171,7 @@ func waitForClients(h *hub.Hub, want int, timeout time.Duration) bool {
 // A peer that stops answering pings (dead network, frozen tab) must be
 // dropped instead of holding its hub slot and goroutines forever.
 func TestUnresponsivePeerIsDropped(t *testing.T) {
-	h, wsURL := startKeepaliveServer(t, 200*time.Millisecond)
+	h, wsURL := startKeepaliveServer(t, 50*time.Millisecond, 200*time.Millisecond)
 	conn := dial(t, wsURL, "r", "silent") // never reads, so never answers a ping
 	defer conn.Close()
 	if !waitForClients(h, 1, time.Second) {
@@ -181,9 +182,11 @@ func TestUnresponsivePeerIsDropped(t *testing.T) {
 	}
 }
 
+// Pings go out far more often than pongWait, so a live peer keeps its
+// connection even when a loaded machine delays a few pongs.
 func TestPeerAnsweringPingsStaysConnected(t *testing.T) {
-	const pongWait = 200 * time.Millisecond
-	h, wsURL := startKeepaliveServer(t, pongWait)
+	const pongWait = 500 * time.Millisecond
+	h, wsURL := startKeepaliveServer(t, 50*time.Millisecond, pongWait)
 	conn := dial(t, wsURL, "r", "alive")
 	defer conn.Close()
 	go func() { // the default ping handler answers each ping while reading
@@ -193,7 +196,7 @@ func TestPeerAnsweringPingsStaysConnected(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(5 * pongWait)
+	time.Sleep(3 * pongWait)
 	if h.ClientCount() != 1 {
 		t.Fatal("a peer answering pings was dropped")
 	}

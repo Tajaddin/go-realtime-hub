@@ -26,21 +26,24 @@ type Server struct {
 	sendBuf        int
 	allowedOrigins map[string]bool
 
-	// A peer is pinged every 9/10 of pongWait and dropped when no pong
-	// arrives within pongWait. Each write must finish within writeWait.
-	pongWait  time.Duration
-	writeWait time.Duration
+	// A peer is pinged every pingPeriod and dropped when no pong arrives
+	// within pongWait, so pingPeriod must be shorter than pongWait. Each
+	// write must finish within writeWait.
+	pingPeriod time.Duration
+	pongWait   time.Duration
+	writeWait  time.Duration
 }
 
 // New returns a server for h. A browser may open a WebSocket only from the
 // server's own origin or from one of allowedOrigins (for example
-// "https://app.example.com"); clients that send no Origin header, which
-// browsers always do, are not restricted.
+// "https://app.example.com"). Clients that send no Origin header (non-browser
+// clients; browsers always send one) are not restricted.
 func New(h *hub.Hub, allowedOrigins ...string) *Server {
 	s := &Server{
 		hub:            h,
 		sendBuf:        64,
 		allowedOrigins: make(map[string]bool, len(allowedOrigins)),
+		pingPeriod:     54 * time.Second,
 		pongWait:       60 * time.Second,
 		writeWait:      10 * time.Second,
 	}
@@ -139,7 +142,7 @@ func (s *Server) readPump(conn *websocket.Conn, room string) {
 // stops it (a failed or timed-out write, or the hub closing Send) also closes
 // the socket, which ends readPump and with it the client's registration.
 func (s *Server) writePump(conn *websocket.Conn, client *hub.Client) {
-	ping := time.NewTicker(s.pongWait * 9 / 10)
+	ping := time.NewTicker(s.pingPeriod)
 	defer func() {
 		ping.Stop()
 		closeConn(conn, client.ID)
