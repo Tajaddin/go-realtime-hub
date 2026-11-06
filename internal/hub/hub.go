@@ -109,16 +109,14 @@ func (h *Hub) Leave(clientID, room string) {
 // Publish fans a message out to every member of room. Returns how many
 // subscribers received it. A full subscriber buffer means a dropped message
 // (counted), never a blocked publisher.
+//
+// The read lock is held for the whole fan-out so RemoveClient cannot close a
+// member's Send channel between the lookup and the send. Every send is
+// non-blocking, so the lock is never held waiting on a subscriber.
 func (h *Hub) Publish(room string, msg []byte) (deliveredCount int) {
 	h.mu.RLock()
-	members := h.rooms[room]
-	targets := make([]*Client, 0, len(members))
-	for _, c := range members {
-		targets = append(targets, c)
-	}
-	h.mu.RUnlock()
-
-	for _, c := range targets {
+	defer h.mu.RUnlock()
+	for _, c := range h.rooms[room] {
 		select {
 		case c.Send <- msg:
 			deliveredCount++

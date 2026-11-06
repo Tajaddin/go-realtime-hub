@@ -105,6 +105,36 @@ func TestBackpressureDropsInsteadOfBlocking(t *testing.T) {
 	}
 }
 
+// A subscriber leaving while a publish is fanning out must not make the
+// publisher send on the subscriber's closed channel.
+func TestPublishDuringRemoveClientDoesNotPanic(t *testing.T) {
+	h := New()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for p := 0; p < 4; p++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					h.Publish("r", []byte("x"))
+				}
+			}
+		}()
+	}
+	for i := 0; i < 20000; i++ {
+		id := fmt.Sprintf("c%d", i)
+		h.AddClient(id, 4)
+		h.Join(id, "r")
+		h.RemoveClient(id)
+	}
+	close(stop)
+	wg.Wait()
+}
+
 func TestConcurrentJoinPublishIsRaceFree(t *testing.T) {
 	h := New()
 	var wg sync.WaitGroup
