@@ -23,7 +23,7 @@ go run ./load -subscribers 10000 -messages 200
 | Slowest / fastest run | 1,057,842 / 6,470,314 /sec |
 | Dropped (consumers kept up) | 0 |
 
-Measured 2026-11-06 on an Intel i5-13600KF (14 cores / 20 threads, 32 GB, Windows 11, Go 1.27.3) on a machine shared with other jobs (total CPU 68-90% when sampled before and after the runs), so this is a loaded-machine figure, not an idle one. Throughput swings with machine load because the publisher and 10,000 consumer goroutines compete for CPU, so read the median, not the fastest run. See [`bench/results.txt`](bench/results.txt) for every run.
+Measured 2026-11-06 on an Intel i5-13600KF (14 cores / 20 threads, 32 GB, Windows 11, Go 1.27.3) on a machine shared with other jobs (total CPU 68-90% when sampled before and after the runs), so this is a loaded-machine figure, not an idle one. Throughput swings with machine load because the publisher and 10,000 consumer goroutines compete for CPU, so read the median, not the fastest run. The earlier ~1.07M figure was measured on a different machine (an i7-10875H), so the rise from it reflects the hardware, not a code change: on this machine the previous code, run alternately with the current one, had a median of ~1.82M, a gap smaller than the run-to-run spread. See [`bench/results.txt`](bench/results.txt) for every run.
 
 The Publish hot path does a **non-blocking** send to each subscriber. A client whose buffer is full has its message dropped and counted, so one slow consumer can never stall the publisher or the other 9,999 subscribers. That bounded, lossy-for-slow-clients fan-out is what keeps a realtime server responsive under load.
 

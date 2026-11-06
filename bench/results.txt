@@ -54,4 +54,6 @@ two medians is smaller than that run-to-run spread.
 
 Earlier figures (1.07M median under load, 1.28M idle) were measured on
 an Intel i7-10875H with the previous code; that machine was not used
-for these runs.
+for these runs. The rise from those figures reflects the hardware, not
+a code change: on this machine the previous code's median is the
+higher of the two.
