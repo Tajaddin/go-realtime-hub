@@ -23,6 +23,11 @@ type Server struct {
 	upgrader       websocket.Upgrader
 	sendBuf        int
 	allowedOrigins map[string]bool
+
+	// A peer is pinged every 9/10 of pongWait and dropped when no pong
+	// arrives within pongWait. Each write must finish within writeWait.
+	pongWait  time.Duration
+	writeWait time.Duration
 }
 
 // New returns a server for h. A browser may open a WebSocket only from the
@@ -34,6 +39,8 @@ func New(h *hub.Hub, allowedOrigins ...string) *Server {
 		hub:            h,
 		sendBuf:        64,
 		allowedOrigins: make(map[string]bool, len(allowedOrigins)),
+		pongWait:       60 * time.Second,
+		writeWait:      10 * time.Second,
 	}
 	for _, o := range allowedOrigins {
 		s.allowedOrigins[strings.ToLower(o)] = true
@@ -108,11 +115,17 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	go s.writePump(conn, client)
-	s.readPump(conn, id, room)
+	s.readPump(conn, room)
 }
 
-func (s *Server) readPump(conn *websocket.Conn, id, room string) {
+func (s *Server) readPump(conn *websocket.Conn, room string) {
 	conn.SetReadLimit(1 << 20)
+	if err := conn.SetReadDeadline(time.Now().Add(s.pongWait)); err != nil {
+		return
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(s.pongWait))
+	})
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
@@ -123,11 +136,30 @@ func (s *Server) readPump(conn *websocket.Conn, id, room string) {
 }
 
 func (s *Server) writePump(conn *websocket.Conn, client *hub.Client) {
-	for msg := range client.Send {
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return
+	ping := time.NewTicker(s.pongWait * 9 / 10)
+	defer ping.Stop()
+	for {
+		select {
+		case msg, ok := <-client.Send:
+			if !ok {
+				return
+			}
+			if err := s.write(conn, websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ping.C:
+			if err := s.write(conn, websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
+}
+
+func (s *Server) write(conn *websocket.Conn, messageType int, data []byte) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(s.writeWait)); err != nil {
+		return err
+	}
+	return conn.WriteMessage(messageType, data)
 }
 
 func itoa(n int64) string {

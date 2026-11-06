@@ -146,6 +146,59 @@ func TestCheckOrigin(t *testing.T) {
 	}
 }
 
+func startKeepaliveServer(t *testing.T, pongWait time.Duration) (*hub.Hub, string) {
+	t.Helper()
+	h := hub.New()
+	s := New(h)
+	s.pongWait = pongWait
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return h, "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
+func waitForClients(h *hub.Hub, want int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if h.ClientCount() == want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return h.ClientCount() == want
+}
+
+// A peer that stops answering pings (dead network, frozen tab) must be
+// dropped instead of holding its hub slot and goroutines forever.
+func TestUnresponsivePeerIsDropped(t *testing.T) {
+	h, wsURL := startKeepaliveServer(t, 200*time.Millisecond)
+	conn := dial(t, wsURL, "r", "silent") // never reads, so never answers a ping
+	defer conn.Close()
+	if !waitForClients(h, 1, time.Second) {
+		t.Fatal("client never registered")
+	}
+	if !waitForClients(h, 0, 3*time.Second) {
+		t.Fatal("peer that answers no pings was not dropped")
+	}
+}
+
+func TestPeerAnsweringPingsStaysConnected(t *testing.T) {
+	const pongWait = 200 * time.Millisecond
+	h, wsURL := startKeepaliveServer(t, pongWait)
+	conn := dial(t, wsURL, "r", "alive")
+	defer conn.Close()
+	go func() { // the default ping handler answers each ping while reading
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(5 * pongWait)
+	if h.ClientCount() != 1 {
+		t.Fatal("a peer answering pings was dropped")
+	}
+}
+
 func TestRequiresRoom(t *testing.T) {
 	wsURL, closeSrv := startServer(t)
 	defer closeSrv()

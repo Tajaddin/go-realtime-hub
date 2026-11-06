@@ -40,7 +40,7 @@ client --ws--> /ws?room=lobby ──┐
 
 | Concern | Implementation |
 |---|---|
-| Transport | WebSocket via `gorilla/websocket`, one read pump + one write pump per connection |
+| Transport | WebSocket via `gorilla/websocket`, one read pump + one write pump per connection; ping every 54 s, a peer with no pong for 60 s is dropped, writes time out after 10 s |
 | Pub/sub core | `internal/hub`: `RWMutex`-guarded rooms, non-blocking fan-out, drop-counting backpressure |
 | Presence | sorted member list per room, exposed at `/presence?room=` |
 | Backpressure | per-client buffered channel; full buffer drops, never blocks (proven in tests) |
