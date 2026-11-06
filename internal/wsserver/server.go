@@ -68,12 +68,17 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		id = "c" + time.Now().Format("150405.000") + "-" + itoa(idSeq.Add(1))
 	}
 
+	client, err := s.hub.AddClient(id, s.sendBuf)
+	if err != nil {
+		http.Error(w, "client id already connected", http.StatusConflict)
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.hub.RemoveClient(id)
 		return // upgrader already wrote the error
 	}
 
-	client := s.hub.AddClient(id, s.sendBuf)
 	s.hub.Join(id, room)
 	defer func() {
 		s.hub.RemoveClient(id)

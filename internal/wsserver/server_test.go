@@ -85,6 +85,34 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestDuplicateIDIsRejected(t *testing.T) {
+	wsURL, closeSrv := startServer(t)
+	defer closeSrv()
+
+	alice := dial(t, wsURL, "lobby", "alice")
+	defer alice.Close()
+	bob := dial(t, wsURL, "lobby", "bob")
+	defer bob.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	imposter, resp, err := websocket.DefaultDialer.Dial(wsURL+"/ws?room=lobby&id=alice", nil)
+	if err == nil {
+		imposter.Close()
+		t.Fatal("second connection with a connected client's id was accepted")
+	}
+	if resp == nil || resp.StatusCode != http.StatusConflict {
+		t.Fatalf("want 409 Conflict for a duplicate id, got %v", resp)
+	}
+
+	if err := bob.WriteMessage(websocket.TextMessage, []byte("still there?")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_ = alice.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, msg, err := alice.ReadMessage(); err != nil || string(msg) != "still there?" {
+		t.Fatalf("original alice should keep receiving: msg=%q err=%v", msg, err)
+	}
+}
+
 func TestRequiresRoom(t *testing.T) {
 	wsURL, closeSrv := startServer(t)
 	defer closeSrv()

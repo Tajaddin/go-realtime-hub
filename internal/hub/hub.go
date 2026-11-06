@@ -10,6 +10,7 @@
 package hub
 
 import (
+	"errors"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -39,20 +40,24 @@ func New() *Hub {
 	}
 }
 
-// AddClient registers a client with a send buffer of bufSize. Re-adding an id
-// returns the existing client.
-func (h *Hub) AddClient(id string, bufSize int) *Client {
+// ErrClientExists is returned by AddClient when the id is already registered.
+var ErrClientExists = errors.New("hub: client id already registered")
+
+// AddClient registers a client with a send buffer of bufSize. An id that is
+// already registered is rejected with ErrClientExists, so a second caller can
+// never share or take over another client's message stream.
+func (h *Hub) AddClient(id string, bufSize int) (*Client, error) {
 	if bufSize <= 0 {
 		bufSize = 16
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if c, ok := h.clients[id]; ok {
-		return c
+	if _, ok := h.clients[id]; ok {
+		return nil, ErrClientExists
 	}
 	c := &Client{ID: id, Send: make(chan []byte, bufSize), rooms: make(map[string]struct{})}
 	h.clients[id] = c
-	return c
+	return c, nil
 }
 
 // RemoveClient unsubscribes a client from all rooms and drops it.

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -20,8 +21,8 @@ func drain(c *Client) [][]byte {
 
 func TestPublishFansOutToAllMembers(t *testing.T) {
 	h := New()
-	a := h.AddClient("a", 8)
-	b := h.AddClient("b", 8)
+	a, _ := h.AddClient("a", 8)
+	b, _ := h.AddClient("b", 8)
 	h.Join("a", "room1")
 	h.Join("b", "room1")
 
@@ -34,10 +35,26 @@ func TestPublishFansOutToAllMembers(t *testing.T) {
 	}
 }
 
+func TestAddClientRejectsDuplicateID(t *testing.T) {
+	h := New()
+	first, err := h.AddClient("a", 8)
+	if err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	h.Join("a", "r")
+	if c, err := h.AddClient("a", 8); !errors.Is(err, ErrClientExists) || c != nil {
+		t.Fatalf("duplicate add: client=%v err=%v, want nil, ErrClientExists", c, err)
+	}
+	h.Publish("r", []byte("x"))
+	if len(drain(first)) != 1 {
+		t.Fatal("the original client must keep receiving")
+	}
+}
+
 func TestPublishOnlyToRoom(t *testing.T) {
 	h := New()
-	a := h.AddClient("a", 8)
-	b := h.AddClient("b", 8)
+	a, _ := h.AddClient("a", 8)
+	b, _ := h.AddClient("b", 8)
 	h.Join("a", "room1")
 	h.Join("b", "room2")
 	h.Publish("room1", []byte("x"))
@@ -143,7 +160,7 @@ func TestConcurrentJoinPublishIsRaceFree(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := fmt.Sprintf("c%d", i)
-			c := h.AddClient(id, 256)
+			c, _ := h.AddClient(id, 256)
 			h.Join(id, "r")
 			go func() { drain(c) }()
 			for j := 0; j < 100; j++ {

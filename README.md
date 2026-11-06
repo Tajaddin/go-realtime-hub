@@ -70,6 +70,8 @@ docker build -t go-realtime-hub . && docker run -p 8080:8080 go-realtime-hub
 # is delivered to the other:
 websocat "ws://localhost:8080/ws?room=lobby&id=alice"
 websocat "ws://localhost:8080/ws?room=lobby&id=bob"
+# `id` is optional (the server generates one); an id that is already connected
+# is refused with 409 Conflict, so nobody can take over another client's stream.
 
 curl localhost:8080/presence?room=lobby   # {"room":"lobby","members":["alice","bob"]}
 curl localhost:8080/stats                  # {"clients":2,"rooms":1,"delivered":N,"dropped":0}
