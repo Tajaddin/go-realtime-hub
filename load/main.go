@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,7 +30,10 @@ func main() {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	for i := 0; i < *subs; i++ {
-		c := h.AddClient(fmt.Sprintf("c%d", i), *buf)
+		c, err := h.AddClient(fmt.Sprintf("c%d", i), *buf)
+		if err != nil {
+			log.Fatal(err)
+		}
 		h.Join(c.ID, room)
 		wg.Add(1)
 		go func(ch <-chan []byte) {

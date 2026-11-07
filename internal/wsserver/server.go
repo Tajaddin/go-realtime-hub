@@ -5,8 +5,12 @@ package wsserver
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,22 +21,50 @@ import (
 var idSeq atomic.Int64
 
 type Server struct {
-	hub      *hub.Hub
-	upgrader websocket.Upgrader
-	sendBuf  int
+	hub            *hub.Hub
+	upgrader       websocket.Upgrader
+	sendBuf        int
+	allowedOrigins map[string]bool
+
+	// A peer is pinged every pingPeriod and dropped when no pong arrives
+	// within pongWait, so pingPeriod must be shorter than pongWait. Each
+	// write must finish within writeWait.
+	pingPeriod time.Duration
+	pongWait   time.Duration
+	writeWait  time.Duration
 }
 
-func New(h *hub.Hub) *Server {
-	return &Server{
-		hub:     h,
-		sendBuf: 64,
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
-			// Demo server: accept any origin. Lock this down in production.
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		},
+// New returns a server for h. A browser may open a WebSocket only from the
+// server's own origin or from one of allowedOrigins (for example
+// "https://app.example.com"). Clients that send no Origin header (non-browser
+// clients; browsers always send one) are not restricted.
+func New(h *hub.Hub, allowedOrigins ...string) *Server {
+	s := &Server{
+		hub:            h,
+		sendBuf:        64,
+		allowedOrigins: make(map[string]bool, len(allowedOrigins)),
+		pingPeriod:     54 * time.Second,
+		pongWait:       60 * time.Second,
+		writeWait:      10 * time.Second,
 	}
+	for _, o := range allowedOrigins {
+		s.allowedOrigins[strings.ToLower(o)] = true
+	}
+	s.upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     s.checkOrigin,
+	}
+	return s
+}
+
+func (s *Server) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" || s.allowedOrigins[strings.ToLower(origin)] {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -68,26 +100,35 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		id = "c" + time.Now().Format("150405.000") + "-" + itoa(idSeq.Add(1))
 	}
 
+	client, err := s.hub.AddClient(id, s.sendBuf)
+	if err != nil {
+		http.Error(w, "client id already connected", http.StatusConflict)
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.hub.RemoveClient(id)
 		return // upgrader already wrote the error
 	}
 
-	client := s.hub.AddClient(id, s.sendBuf)
 	s.hub.Join(id, room)
 	defer func() {
 		s.hub.RemoveClient(id)
-		if err := conn.Close(); err != nil {
-			log.Printf("ws close (id=%s): %v", id, err)
-		}
+		closeConn(conn, id)
 	}()
 
 	go s.writePump(conn, client)
-	s.readPump(conn, id, room)
+	s.readPump(conn, room)
 }
 
-func (s *Server) readPump(conn *websocket.Conn, id, room string) {
+func (s *Server) readPump(conn *websocket.Conn, room string) {
 	conn.SetReadLimit(1 << 20)
+	if err := conn.SetReadDeadline(time.Now().Add(s.pongWait)); err != nil {
+		return
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(s.pongWait))
+	})
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
@@ -97,11 +138,44 @@ func (s *Server) readPump(conn *websocket.Conn, id, room string) {
 	}
 }
 
+// writePump drains client.Send to the socket and pings the peer. Whatever
+// stops it (a failed or timed-out write, or the hub closing Send) also closes
+// the socket, which ends readPump and with it the client's registration.
 func (s *Server) writePump(conn *websocket.Conn, client *hub.Client) {
-	for msg := range client.Send {
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return
+	ping := time.NewTicker(s.pingPeriod)
+	defer func() {
+		ping.Stop()
+		closeConn(conn, client.ID)
+	}()
+	for {
+		select {
+		case msg, ok := <-client.Send:
+			if !ok {
+				return
+			}
+			if err := s.write(conn, websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ping.C:
+			if err := s.write(conn, websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
+	}
+}
+
+func (s *Server) write(conn *websocket.Conn, messageType int, data []byte) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(s.writeWait)); err != nil {
+		return err
+	}
+	return conn.WriteMessage(messageType, data)
+}
+
+// closeConn closes conn. Both pumps call it when they stop, so the second
+// call finding the socket already closed is expected and not logged.
+func closeConn(conn *websocket.Conn, id string) {
+	if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		log.Printf("ws close (id=%s): %v", id, err)
 	}
 }
 

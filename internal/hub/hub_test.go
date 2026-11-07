@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -20,8 +21,8 @@ func drain(c *Client) [][]byte {
 
 func TestPublishFansOutToAllMembers(t *testing.T) {
 	h := New()
-	a := h.AddClient("a", 8)
-	b := h.AddClient("b", 8)
+	a, _ := h.AddClient("a", 8)
+	b, _ := h.AddClient("b", 8)
 	h.Join("a", "room1")
 	h.Join("b", "room1")
 
@@ -34,10 +35,26 @@ func TestPublishFansOutToAllMembers(t *testing.T) {
 	}
 }
 
+func TestAddClientRejectsDuplicateID(t *testing.T) {
+	h := New()
+	first, err := h.AddClient("a", 8)
+	if err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	h.Join("a", "r")
+	if c, err := h.AddClient("a", 8); !errors.Is(err, ErrClientExists) || c != nil {
+		t.Fatalf("duplicate add: client=%v err=%v, want nil, ErrClientExists", c, err)
+	}
+	h.Publish("r", []byte("x"))
+	if len(drain(first)) != 1 {
+		t.Fatal("the original client must keep receiving")
+	}
+}
+
 func TestPublishOnlyToRoom(t *testing.T) {
 	h := New()
-	a := h.AddClient("a", 8)
-	b := h.AddClient("b", 8)
+	a, _ := h.AddClient("a", 8)
+	b, _ := h.AddClient("b", 8)
 	h.Join("a", "room1")
 	h.Join("b", "room2")
 	h.Publish("room1", []byte("x"))
@@ -105,6 +122,36 @@ func TestBackpressureDropsInsteadOfBlocking(t *testing.T) {
 	}
 }
 
+// A subscriber leaving while a publish is fanning out must not make the
+// publisher send on the subscriber's closed channel.
+func TestPublishDuringRemoveClientDoesNotPanic(t *testing.T) {
+	h := New()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for p := 0; p < 4; p++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					h.Publish("r", []byte("x"))
+				}
+			}
+		}()
+	}
+	for i := 0; i < 20000; i++ {
+		id := fmt.Sprintf("c%d", i)
+		h.AddClient(id, 4)
+		h.Join(id, "r")
+		h.RemoveClient(id)
+	}
+	close(stop)
+	wg.Wait()
+}
+
 func TestConcurrentJoinPublishIsRaceFree(t *testing.T) {
 	h := New()
 	var wg sync.WaitGroup
@@ -113,7 +160,7 @@ func TestConcurrentJoinPublishIsRaceFree(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := fmt.Sprintf("c%d", i)
-			c := h.AddClient(id, 256)
+			c, _ := h.AddClient(id, 256)
 			h.Join(id, "r")
 			go func() { drain(c) }()
 			for j := 0; j < 100; j++ {

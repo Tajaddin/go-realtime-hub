@@ -10,6 +10,7 @@
 package hub
 
 import (
+	"errors"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -39,20 +40,24 @@ func New() *Hub {
 	}
 }
 
-// AddClient registers a client with a send buffer of bufSize. Re-adding an id
-// returns the existing client.
-func (h *Hub) AddClient(id string, bufSize int) *Client {
+// ErrClientExists is returned by AddClient when the id is already registered.
+var ErrClientExists = errors.New("hub: client id already registered")
+
+// AddClient registers a client with a send buffer of bufSize. An id that is
+// already registered is rejected with ErrClientExists, so a second caller can
+// never share or take over another client's message stream.
+func (h *Hub) AddClient(id string, bufSize int) (*Client, error) {
 	if bufSize <= 0 {
 		bufSize = 16
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if c, ok := h.clients[id]; ok {
-		return c
+	if _, ok := h.clients[id]; ok {
+		return nil, ErrClientExists
 	}
 	c := &Client{ID: id, Send: make(chan []byte, bufSize), rooms: make(map[string]struct{})}
 	h.clients[id] = c
-	return c
+	return c, nil
 }
 
 // RemoveClient unsubscribes a client from all rooms and drops it.
@@ -109,16 +114,14 @@ func (h *Hub) Leave(clientID, room string) {
 // Publish fans a message out to every member of room. Returns how many
 // subscribers received it. A full subscriber buffer means a dropped message
 // (counted), never a blocked publisher.
+//
+// The read lock is held for the whole fan-out so RemoveClient cannot close a
+// member's Send channel between the lookup and the send. Every send is
+// non-blocking, so the lock is never held waiting on a subscriber.
 func (h *Hub) Publish(room string, msg []byte) (deliveredCount int) {
 	h.mu.RLock()
-	members := h.rooms[room]
-	targets := make([]*Client, 0, len(members))
-	for _, c := range members {
-		targets = append(targets, c)
-	}
-	h.mu.RUnlock()
-
-	for _, c := range targets {
+	defer h.mu.RUnlock()
+	for _, c := range h.rooms[room] {
 		select {
 		case c.Send <- msg:
 			deliveredCount++

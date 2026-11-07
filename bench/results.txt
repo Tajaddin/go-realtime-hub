@@ -1,57 +1,59 @@
-# go-realtime-hub fan-out benchmark — dual framing
-timestamp:  2026-05-23T01:30-04:00 (typical runs)
-hardware:   Intel i7-10875H 8c/16t @ 2.3GHz; 32 GB RAM; Windows 11
-runtime:    Go 1.26.3 (in-process pub/sub; no network)
-command:    go run ./load -subscribers 10000 -messages 200
+# go-realtime-hub fan-out benchmark
+date:      2026-11-06
+hardware:  Intel i5-13600KF 14c/20t; 32 GB RAM; Windows 11
+runtime:   Go 1.27.3 (in-process pub/sub; no network)
+command:   go run ./load -subscribers 10000 -messages 200
 
-Throughput depends heavily on machine load because both the publisher
-and 10,000 consumer goroutines compete for CPU. Two distinct conditions
-were captured:
+Throughput depends heavily on machine load because the publisher and
+10,000 consumer goroutines compete for CPU. These runs were taken on a
+machine shared with other jobs (total CPU 68-90% when sampled before
+and after the runs), so they spread widely and are a loaded-machine
+figure, not an idle one; the median is the number to quote.
 
-## Best observed (idle machine) — peak
-deliveries_per_sec: 1,281,987
-dropped:            0
-(Original baseline run, captured before audit. Same hardware, lighter
- background load.)
+## Current code (Publish holds the read lock for the whole fan-out)
+14 runs, interleaved with the runs of the previous code below.
+run  1:   1422882 deliveries/sec, 0 dropped, publish_seconds 1.4056
+run  2:   1057842 deliveries/sec, 0 dropped, publish_seconds 1.8906
+run  3:   1645827 deliveries/sec, 0 dropped, publish_seconds 1.2152
+run  4:   1825475 deliveries/sec, 0 dropped, publish_seconds 1.0956
+run  5:   1449581 deliveries/sec, 0 dropped, publish_seconds 1.3797
+run  6:   1465576 deliveries/sec, 0 dropped, publish_seconds 1.3647
+run  7:   1562430 deliveries/sec, 0 dropped, publish_seconds 1.2801
+run  8:   1661910 deliveries/sec, 0 dropped, publish_seconds 1.2034
+run  9:   6470314 deliveries/sec, 0 dropped, publish_seconds 0.3091
+run 10:   2304139 deliveries/sec, 0 dropped, publish_seconds 0.8680
+run 11:   1535961 deliveries/sec, 0 dropped, publish_seconds 1.3021
+run 12:   1562567 deliveries/sec, 0 dropped, publish_seconds 1.2799
+run 13:   1259416 deliveries/sec, 0 dropped, publish_seconds 1.5880
+run 14:   1455943 deliveries/sec, 0 dropped, publish_seconds 1.3737
+median:  1,549,196 deliveries/sec
+slowest: 1,057,842   fastest: 6,470,314
 
-## Typical observed (today, normal dev-session load) — 3 consecutive runs
-run 1: 1,088,989 deliveries/sec, 0 dropped, publish_seconds 1.84
-run 2: 1,066,319 deliveries/sec, 0 dropped, publish_seconds 1.88
-run 3:   926,731 deliveries/sec, 0 dropped, publish_seconds 2.16
-median: 1,066,319 deliveries/sec
-max:    1,088,989 deliveries/sec
+## Previous code (a6cf137: member list copied, lock released before sending)
+Same machine and command, run alternately with the runs above.
+run  1:   1413790 deliveries/sec, 0 dropped, publish_seconds 1.4146
+run  2:   1428727 deliveries/sec, 0 dropped, publish_seconds 1.3998
+run  3:   1582412 deliveries/sec, 0 dropped, publish_seconds 1.2639
+run  4:   1619725 deliveries/sec, 0 dropped, publish_seconds 1.2348
+run  5:   1987698 deliveries/sec, 0 dropped, publish_seconds 1.0062
+run  6:   1818348 deliveries/sec, 0 dropped, publish_seconds 1.0999
+run  7:   3134204 deliveries/sec, 0 dropped, publish_seconds 0.6381
+run  8:   5878618 deliveries/sec, 0 dropped, publish_seconds 0.3402
+run  9:   7317294 deliveries/sec, 0 dropped, publish_seconds 0.2733
+run 10:   2982954 deliveries/sec, 0 dropped, publish_seconds 0.6705
+run 11:   2194527 deliveries/sec, 27405 dropped, publish_seconds 0.8989
+run 12:   1275189 deliveries/sec, 0 dropped, publish_seconds 1.5684
+run 13:   1821005 deliveries/sec, 0 dropped, publish_seconds 1.0983
+run 14:   1455734 deliveries/sec, 0 dropped, publish_seconds 1.3739
+median:  1,819,677 deliveries/sec
+slowest: 1,275,189   fastest: 7,317,294
 
-## Stress observed (heavy concurrent load) — for reference
-Earlier same-session probe under unusually heavy background load saw
-~650K deliveries/sec across 3 runs, still 0 dropped. Reproduces when
-the machine has substantial concurrent work; not a code regression.
+The fastest runs (previous code 7-10, current code 9-10) all fall in
+the same 25 seconds, when background load dropped. The gap between the
+two medians is smaller than that run-to-run spread.
 
-## Today's raw runs
-
-=== run 1 ===
-subscribers:        10000
-messages:           200
-fan-out operations: 2000000
-publish_seconds:    1.8366
-deliveries_per_sec: 1088989
-delivered (sent):   2000000
-dropped (slow buf): 0
-received (drained): 2000000
-=== run 2 ===
-subscribers:        10000
-messages:           200
-fan-out operations: 2000000
-publish_seconds:    1.8756
-deliveries_per_sec: 1066319
-delivered (sent):   2000000
-dropped (slow buf): 0
-received (drained): 2000000
-=== run 3 ===
-subscribers:        10000
-messages:           200
-fan-out operations: 2000000
-publish_seconds:    2.1581
-deliveries_per_sec: 926731
-delivered (sent):   2000000
-dropped (slow buf): 0
-received (drained): 2000000
+Earlier figures (1.07M median under load, 1.28M idle) were measured on
+an Intel i7-10875H with the previous code; that machine was not used
+for these runs. The rise from those figures reflects the hardware, not
+a code change: on this machine the previous code's median is the
+higher of the two.
